@@ -1,0 +1,9 @@
+music-dump
+__pycache__/
+*.pyc
+.DS_Store
+*.sqlite
+*.tsv
+*.out
+*.xml
+*.log
