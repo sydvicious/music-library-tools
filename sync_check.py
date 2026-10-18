@@ -7,9 +7,10 @@
   sync_check.py merge <folder> disk.tsv db.tsv [music.tsv]
   sync_check.py check <folder> <source> [music.tsv]  snapshot disk + db, then merge
   sync_check.py paths                                print the configured paths as JSON
-  sync_check.py library-check (--export | --xml Library.xml) [--notify]
-        the whole check for the Music library: lite hash, Music XML (exported by GUI scripting
-        with --export), disk + db snapshots, merge, summary (+ macOS notification), log in
+  sync_check.py library-check [--musicdb] [--export | --xml Library.xml] [--notify]
+        the whole check for the Music library: lite hash, Music's view (--musicdb reads its database
+        file directly, Music can be closed; --export drives File > Export Library; with both, the
+        XML cross-checks the database), disk + db snapshots, merge, summary (+ notification), log in
         <data>/snapshots/library-check.log
 
 Every snapshot is a TSV whose first column is the path (Unicode NFC), sorted by path
@@ -94,6 +95,22 @@ def snapshot_music_xml(xml, out=None):
                      '', clean(t.get('Kind')), clean(t.get('Artist')), clean(t.get('Album')), clean(t.get('Name'))))
     header = ('path', 'size', 'modified', 'pid', 'location_type', 'cloud', 'drm', 'media_kind', 'kind', 'artist', 'album', 'title')
     return write_sorted(rows, header, out or os.path.join(SNAPS, f'music-xml-{stamp()}.tsv'))
+
+def snapshot_musicdb(out=None):
+    """Music's library database read directly (musicdb.py): visible tracks only, same columns as the
+    XML snapshot. Returns (tsv path, ghost count, database save time)."""
+    import musicdb
+    b, mtime = musicdb.decode()
+    tracks, pls = musicdb.parse(b)
+    rows = [r[:-1] for r in musicdb.rows(tracks) if r[-1] == '1']
+    ghosts = len(tracks) - len(rows)
+    path = write_sorted(rows, musicdb.HEADER[:-1], out or os.path.join(SNAPS, f'music-db-{stamp()}.tsv'))
+    return path, ghosts, mtime
+
+def xml_pids(xml):
+    import plistlib
+    with open(os.path.expanduser(xml), 'rb') as f: pl = plistlib.load(f)
+    return {t['Persistent ID']: t for t in pl.get('Tracks', {}).values()}
 
 def read_tsv(path, tag):
     """Yield (key, tag, row) sorted by the case-folded path key; rows with no path come first.
@@ -185,13 +202,17 @@ EXPORT_XML = os.path.join(SNAPS, 'Library-export.xml')
 def notify(title, msg):
     subprocess.run(['osascript', '-e', f'display notification {json.dumps(msg)} with title {json.dumps(title)}'])
 
-def library_check(xml=None, export=False, do_notify=False):
-    """One command: hash new/changed files, get Music's view (exported XML), snapshot disk + db, merge."""
+def library_check(xml=None, export=False, do_notify=False, use_musicdb=False):
+    """One command: hash new/changed files, get Music's view, snapshot disk + db, merge.
+    Music's view comes from its database file (use_musicdb; Music can be closed) and/or the XML
+    export (--export drives Music's menu; --xml uses a file). With both, the database drives the
+    merge and the XML is used as a cross-check of which tracks are in the library."""
     log = []
     def say(m): print(m, flush=True); log.append(m)
     t0 = datetime.datetime.now()
     r = subprocess.run([os.path.join(HERE, 'audio_hash.py'), 'lite', 'library', LIBRARY], capture_output=True, text=True)
     say('lite: ' + (r.stdout.strip().splitlines() or ['(no output)'])[-1])
+    notes = []
     if export:
         r = subprocess.run(['osascript', '-l', 'JavaScript', os.path.join(HERE, 'export_library.js'), EXPORT_XML],
                            capture_output=True, text=True)
@@ -199,22 +220,52 @@ def library_check(xml=None, export=False, do_notify=False):
         if r.returncode != 0:
             msg = 'Music export failed: ' + (r.stderr.strip() or r.stdout.strip())[:200]
             say(msg)
-            if do_notify: notify('Music library check FAILED', msg)
+            if not use_musicdb:
+                if do_notify: notify('Music library check FAILED', msg)
+                sys.exit(1)
+            notes.append('XML export failed')
+        else:
+            xml = EXPORT_XML
+    xml_age = None
+    if xml:
+        xml_age = (t0.timestamp() - os.path.getmtime(os.path.expanduser(xml))) / 60
+        say(f'Music XML: {xml} ({xml_age:.0f} min old)')
+    if use_musicdb:
+        try:
+            mtsv, ghosts, saved = snapshot_musicdb()
+        except Exception as e:
+            msg = f'Reading Library.musicdb failed ({e}); the format may have changed'
+            say(msg); notes.append('musicdb unreadable')
+            if do_notify: notify('Music library check: database format changed?', msg[:200])
+            mtsv = None
+        if mtsv:
+            say(f'Music database: saved {datetime.datetime.fromtimestamp(saved):%Y-%m-%d %H:%M}, {ghosts} ghost records')
+            counts = merge(LIBRARY, snapshot_disk(LIBRARY), snapshot_db('library'), mtsv)
+            if xml and xml_age is not None and xml_age <= 60:
+                # Cross-check: same tracks in the library according to both sources?
+                import csv
+                dbp = {r['pid'] for r in csv.DictReader(open(mtsv, encoding='utf-8'), delimiter='\t', quoting=csv.QUOTE_NONE)
+                       if r['kind'] not in ('PDF document', 'iTunes LP')}
+                xp = {p for p, t in xml_pids(xml).items() if t.get('Kind') not in ('PDF document', 'iTunes LP')}
+                only_db, only_xml = dbp - xp, xp - dbp
+                say(f'cross-check vs XML: {len(only_db)} only in database, {len(only_xml)} only in XML')
+                if only_db or only_xml: notes.append(f'database/XML disagree on {len(only_db) + len(only_xml)} tracks')
+        elif xml:
+            counts = merge(LIBRARY, snapshot_disk(LIBRARY), snapshot_db('library'), snapshot_music_xml(xml))
+        else:
             sys.exit(1)
-        xml = EXPORT_XML
-    if not xml: sys.exit('library-check needs --xml PATH or --export')
-    xml_age = (t0.timestamp() - os.path.getmtime(os.path.expanduser(xml))) / 60
-    say(f'Music XML: {xml} ({xml_age:.0f} min old)')
-    counts = merge(LIBRARY, snapshot_disk(LIBRARY), snapshot_db('library'), snapshot_music_xml(xml))
+    else:
+        if not xml: sys.exit('library-check needs --musicdb, --xml PATH or --export')
+        counts = merge(LIBRARY, snapshot_disk(LIBRARY), snapshot_db('library'), snapshot_music_xml(xml))
+        if xml_age > 60: notes.append(f'Music export failed; used the library XML from {xml_age/60:.0f} h ago')
     problems = {k: v for k, v in counts.items() if k not in ('ok', 'cache-gone', 'no-file')}
     summary = ', '.join(f'{k} {v}' for k, v in sorted(problems.items())) or 'all in sync'
-    if xml_age > 60:
-        summary = f'Music export failed; used the library XML from {xml_age/60:.0f} h ago. ' + summary
+    if notes: summary = '; '.join(notes) + '. ' + summary
     say(f'Result: {summary} (ok {counts["ok"]}, Apple Music cache gone {counts["cache-gone"]})')
-    with open(os.path.join(SNAPS, 'library-check.log'), 'a') as f:
-        f.write(f'--- {t0:%Y-%m-%d %H:%M:%S}\n' + '\n'.join(log) + '\n')
     removed = cleanup()
     if removed: say(f'cleanup: removed {removed} snapshot/report files older than {KEEP_DAYS} days')
+    with open(os.path.join(SNAPS, 'library-check.log'), 'a') as f:
+        f.write(f'--- {t0:%Y-%m-%d %H:%M:%S}\n' + '\n'.join(log) + '\n')
     if do_notify: notify('Music library check', summary)
     return problems
 
@@ -223,7 +274,7 @@ def cleanup(days=KEEP_DAYS):
     """Delete snapshot TSVs and dated Sync Check reports older than `days` days."""
     import glob, time
     cutoff = time.time() - days * 86400
-    pats = [os.path.join(SNAPS, x) for x in ('disk-*.tsv', 'db-*.tsv', 'music-xml-*.tsv', 'music-*.tsv')] + \
+    pats = [os.path.join(SNAPS, x) for x in ('disk-*.tsv', 'db-*.tsv', 'music-xml-*.tsv', 'music-db-*.tsv', 'music-*.tsv')] + \
            [os.path.join(REPORTS, '????-??-?? Sync Check.tsv')]
     n = 0
     for pat in pats:
@@ -250,7 +301,7 @@ if __name__ == '__main__':
         print(json.dumps({'repo': C.REPO, 'library': C.LIBRARY, 'data': C.DATA, 'reports': C.REPORTS, 'snaps': C.SNAPS, 'db': C.DB}))
     elif a and a[0] == 'library-check':
         xml = a[a.index('--xml') + 1] if '--xml' in a else None
-        library_check(xml, export='--export' in a, do_notify='--notify' in a)
+        library_check(xml, export='--export' in a, do_notify='--notify' in a, use_musicdb='--musicdb' in a)
     elif len(a) in (3, 4) and a[0] == 'check':
         merge(a[1], snapshot_disk(a[1]), snapshot_db(a[2]), a[3] if len(a) > 3 else None)
     else: sys.exit(__doc__)
