@@ -7,9 +7,9 @@
   sync_check.py merge <folder> disk.tsv db.tsv [music.tsv]
   sync_check.py check <folder> <source> [music.tsv]  snapshot disk + db, then merge
   sync_check.py paths                                print the configured paths as JSON
-  sync_check.py library-check [--musicdb] [--export | --xml Library.xml] [--notify]
-        the whole check for the Music library: lite hash, Music's view (--musicdb reads its database
-        file directly, Music can be closed; --export drives File > Export Library; with both, the
+  sync_check.py library-check [--no-musicdb] [--export | --xml Library.xml] [--notify]
+        the whole check for the Music library: lite hash, Music's view (read from its database
+        file directly by default, Music can be closed; --no-musicdb turns that off; --export drives File > Export Library; with both, the
         XML cross-checks the database), disk + db snapshots, merge, summary (+ notification), log in
         <data>/snapshots/library-check.log
 
@@ -301,7 +301,7 @@ if __name__ == '__main__':
         print(json.dumps({'repo': C.REPO, 'library': C.LIBRARY, 'data': C.DATA, 'reports': C.REPORTS, 'snaps': C.SNAPS, 'db': C.DB}))
     elif a and a[0] == 'library-check':
         xml = a[a.index('--xml') + 1] if '--xml' in a else None
-        library_check(xml, export='--export' in a, do_notify='--notify' in a, use_musicdb='--musicdb' in a)
+        library_check(xml, export='--export' in a, do_notify='--notify' in a, use_musicdb='--no-musicdb' not in a)
     elif len(a) in (3, 4) and a[0] == 'check':
         merge(a[1], snapshot_disk(a[1]), snapshot_db(a[2]), a[3] if len(a) > 3 else None)
     else: sys.exit(__doc__)

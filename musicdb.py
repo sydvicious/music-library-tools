@@ -4,6 +4,9 @@
   musicdb.py tracks [out.tsv]       one row per track (same columns as music-dump, plus 'visible')
   musicdb.py summary                counts: tracks, visible, ghosts, playlists
   musicdb.py playlists              playlist names and sizes
+  musicdb.py watch [PID ...]         record whether these tracks are in the library (adds PIDs to the
+                                    watch list); with no PIDs, check the list. Logs to
+                                    <data>/snapshots/watch.log and notifies when one turns into a ghost.
 
 The format is undocumented and reverse-engineered, so a macOS update may break it; when it does,
 this fails loudly (which is itself a warning that Music changed under you).
@@ -124,8 +127,36 @@ def rows(tracks):
                clean(kind), clean(t.get('artist')), clean(t.get('album')), clean(t.get('title')),
                '1' if t['visible'] else '0')
 
+def watch(new_pids):
+    import json
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    import mlt_config as C
+    state_f = os.path.join(C.SNAPS, 'watch.json'); log_f = os.path.join(C.SNAPS, 'watch.log')
+    try: state = json.load(open(state_f))
+    except (OSError, ValueError): state = {}
+    b, mtime = decode(); tracks, _ = parse(b)
+    for p in new_pids: state.setdefault(p.upper(), None)
+    saved = datetime.datetime.fromtimestamp(mtime).strftime('%Y-%m-%d %H:%M')
+    lines, changed = [], []
+    for p, prev in state.items():
+        t = tracks.get(p)
+        now = 'missing' if not t else ('visible' if t['visible'] else 'ghost')
+        desc = f"{t.get('artist','')} — {t.get('title','')}" if t else p
+        lines.append(f'{p} {now:8} {desc}')
+        if prev is not None and prev != now: changed.append(f'{desc}: {prev} -> {now}')
+        state[p] = now
+    json.dump(state, open(state_f, 'w'), indent=1)
+    with open(log_f, 'a') as f:
+        f.write(f'--- {datetime.datetime.now():%Y-%m-%d %H:%M} (database saved {saved})\n' + '\n'.join(lines) + '\n')
+        for c in changed: f.write('CHANGED ' + c + '\n')
+    print('\n'.join(lines)); [print('CHANGED', c) for c in changed]
+    if changed:
+        msg = '; '.join(changed)[:200]
+        subprocess.run(['osascript', '-e', f'display notification {json.dumps(msg)} with title "Music: watched tracks changed"'])
+
 if __name__ == '__main__':
     a = sys.argv[1:]
+    if a and a[0] == 'watch': watch(a[1:]); sys.exit(0)
     if not a or a[0] not in ('tracks', 'summary', 'playlists'): sys.exit(__doc__)
     b, mtime = decode()
     tracks, pls = parse(b)

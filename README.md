@@ -9,7 +9,7 @@ The core idea is **three sources of truth kept in sync**:
 1. **the disk**: the media files in the library folder
 2. **a database**: an SQLite catalog of every file's path, size, mtime and an *audio-only* MD5
    (ffmpeg hashes the audio packets, so retagging or new artwork doesn't change it)
-3. **Music.app**: every track's file location, from Music's exported library XML
+3. **Music.app**: every track's file location, read directly from Music's database file (`musicdb.py`), cross-checked against Music's exported library XML when available
 
 Each is snapshotted to a TSV sorted by path, and one merge pass classifies every path.
 
@@ -46,6 +46,8 @@ the dated reports. Run `./sync_check.py paths` to see what's in effect.
 | `dup_report.py` | Report of identical audio within the library; known, intended sets can be listed by MD5 in `~/.config/music-library-tools/dup-ignore.txt` |
 | `prune_empty_dirs.py [ROOT] [--dry-run]` | Remove folders that are empty or contain only `.DS_Store` |
 | `export_library.js` | Drives File > Library > Export Library… through Accessibility actions (no keystrokes) |
+| `musicdb.py tracks\|summary\|playlists` | Reads Music's `Library.musicdb` directly (reverse-engineered; Music can be closed). Tracks not in the master library playlist are reported as ghost records |
+| `musicdb.py watch [PID ...]` | Tracks whether given persistent IDs stay in the library; logs to `<data>/snapshots/watch.log` and notifies on change (run hourly by a launchd agent) |
 | `music_dump.swift` | Dumps the library through Apple's iTunesLibrary framework. Fast, but it reads a shared media library (TV and Books too) that can be stale, so the check uses the XML instead |
 
 A full rebuild of the database is: move it to the Trash, then run `lite` again.
