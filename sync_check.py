@@ -26,7 +26,9 @@ files together (heapq.merge), so each path is seen once with a presence mask:
    -    -   M     missing         (Music points to a file that doesn't exist)
   A missing 'HLS media' item (an Apple Music download whose cache file is gone) is 'cache-gone'.
   Music paths outside <folder> are classed 'outside'; Music items with no file at all are
-  'no-file' (remote/cloud items are counted, not listed). Without music.tsv, the music
+  'no-file'. Remote items: Apple Music catalog tracks stream and are only counted; any other remote
+  item is reported: 'cloud-only' (your own upload or purchase whose local file is gone) or
+  'apple-music-gone' (an Apple Music track no longer in the catalog, so it can't stream). Without music.tsv, the music
   column is ignored and only disk vs db is checked.
 
 Writes "<date> Sync Check.tsv" (every non-ok path) to the reports folder and prints a summary.
@@ -88,7 +90,7 @@ def snapshot_music_xml(xml, out=None):
         ltype = {'File': 'file', 'Remote': 'remote', 'URL': 'url'}.get(ttype, ttype.lower())
         mod = t.get('Date Modified'); mod = int(mod.timestamp()) if mod else ''
         rows.append((path, t.get('Size', ''), mod, t.get('Persistent ID', ''), ltype,
-                     '1' if t.get('Apple Music') or t.get('Matched') else '0', '1' if t.get('Protected') else '0',
+                     '1' if t.get('Apple Music') else '0', '1' if t.get('Protected') else '0',
                      '', clean(t.get('Kind')), clean(t.get('Artist')), clean(t.get('Album')), clean(t.get('Name'))))
     header = ('path', 'size', 'modified', 'pid', 'location_type', 'cloud', 'drm', 'media_kind', 'kind', 'artist', 'album', 'title')
     return write_sorted(rows, header, out or os.path.join(SNAPS, f'music-xml-{stamp()}.tsv'))
@@ -113,9 +115,16 @@ def merge(folder, disk_tsv, db_tsv, music_tsv=None):
     def music_iter():
         for k, t, d in read_tsv(music_tsv, 'music'):
             if k is None:
-                kind = 'remote' if d.get('location_type') == 'remote' else 'no-file'
+                if d.get('location_type') == 'remote':
+                    # Apple Music catalog items stream; anything else (your own uploads,
+                    # purchases) should have a local file, so it counts as lost.
+                    if d.get('cloud') == '1': kind = 'remote'
+                    elif d.get('kind', '').startswith('Apple Music'): kind = 'apple-music-gone'   # pulled from the catalog
+                    else: kind = 'cloud-only'
+                else:
+                    kind = 'no-file'
                 nofile[kind] += 1
-                if kind == 'no-file': nofile_rows.append(d)
+                if kind != 'remote': nofile_rows.append((kind, d))
                 continue
             yield (k, t, d)
     if music_tsv: streams.append(music_iter())
@@ -154,8 +163,8 @@ def merge(folder, disk_tsv, db_tsv, music_tsv=None):
             flush(cur_key, group); cur_key, group = key, {}
         group[tag] = row
     flush(cur_key, group)
-    for d in nofile_rows:
-        counts['no-file'] += 1; report.append(('no-file', '', 'M', d.get('pid', ''), describe(d)))
+    for kind, d in nofile_rows:
+        counts[kind] += 1; report.append((kind, '', 'M', d.get('pid', ''), describe(d)))
 
     out = os.path.join(REPORTS, f'{datetime.date.today().isoformat()} Sync Check.tsv')
     with open(out, 'w', encoding='utf-8') as f:
@@ -164,9 +173,9 @@ def merge(folder, disk_tsv, db_tsv, music_tsv=None):
     inputs = f'disk={os.path.basename(disk_tsv)} db={os.path.basename(db_tsv)}' + \
              (f' music={os.path.basename(music_tsv)}' if music_tsv else ' (no music snapshot)')
     print(inputs)
-    order = ['ok', 'changed', 'unhashed', 'orphan', 'orphan-unhashed', 'missing', 'cache-gone', 'stale-row', 'outside', 'no-file']
+    order = ['ok', 'changed', 'unhashed', 'orphan', 'orphan-unhashed', 'missing', 'cloud-only', 'apple-music-gone', 'cache-gone', 'stale-row', 'outside', 'no-file']
     print('  ' + '  '.join(f'{k} {counts[k]}' for k in order if counts[k]))
-    if nofile['remote']: print(f'  (plus {nofile["remote"]} remote/cloud items with no local file)')
+    if nofile['remote']: print(f'  (plus {nofile["remote"]} Apple Music catalog items, which stream)')
     print(f'Report: {out}')
     return counts
 
