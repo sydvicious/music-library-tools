@@ -200,7 +200,7 @@ LIBRARY = C.LIBRARY
 EXPORT_XML = os.path.join(SNAPS, 'Library-export.xml')
 
 def notify(title, msg):
-    subprocess.run(['osascript', '-e', f'display notification {json.dumps(msg)} with title {json.dumps(title)}'])
+    subprocess.run(['osascript', '-e', f'display notification {json.dumps(msg, ensure_ascii=False)} with title {json.dumps(title, ensure_ascii=False)}'])
 
 def library_check(xml=None, export=False, do_notify=False, use_musicdb=False):
     """One command: hash new/changed files, get Music's view, snapshot disk + db, merge.

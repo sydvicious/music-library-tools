@@ -134,17 +134,37 @@ def watch(new_pids):
     state_f = os.path.join(C.SNAPS, 'watch.json'); log_f = os.path.join(C.SNAPS, 'watch.log')
     try: state = json.load(open(state_f))
     except (OSError, ValueError): state = {}
-    b, mtime = decode(); tracks, _ = parse(b)
+    path = default_path()
+    b, mtime = decode(path); tracks, _ = parse(b)
     for p in new_pids: state.setdefault(p.upper(), None)
+    # Evidence: keep a copy of each distinct saved database (newest 96) for before/after comparison.
+    arch = os.path.join(C.SNAPS, 'musicdb-archive'); os.makedirs(arch, exist_ok=True)
+    stamp = datetime.datetime.fromtimestamp(mtime).strftime('%Y%m%d-%H%M%S')
+    dst = os.path.join(arch, f'Library-{stamp}.musicdb')
+    if not os.path.exists(dst): shutil.copy2(path, dst)
+    for old in sorted(f for f in os.listdir(arch) if f.endswith('.musicdb'))[:-96]:
+        os.remove(os.path.join(arch, old))
+    last_run = state.pop('_last_run', None)
     saved = datetime.datetime.fromtimestamp(mtime).strftime('%Y-%m-%d %H:%M')
     lines, changed = [], []
-    for p, prev in state.items():
+    for p, prev in list(state.items()):
         t = tracks.get(p)
         now = 'missing' if not t else ('visible' if t['visible'] else 'ghost')
         desc = f"{t.get('artist','')} — {t.get('title','')}" if t else p
         lines.append(f'{p} {now:8} {desc}')
         if prev is not None and prev != now: changed.append(f'{desc}: {prev} -> {now}')
         state[p] = now
+    now_s = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    if changed and last_run:
+        # Evidence: what Music's cloud-library processes logged since the previous check.
+        logf = os.path.join(C.SNAPS, f'watch-change-{datetime.datetime.now():%Y%m%d-%H%M%S}.log')
+        with open(logf, 'w') as lf:
+            subprocess.run(['/usr/bin/log', 'show', '--start', last_run, '--style', 'compact', '--predicate',
+                            'process == "itunescloudd" OR process == "AMPLibraryAgent" OR process == "Music" '
+                            'OR process == "amsaccountsd" OR subsystem CONTAINS "itunescloud"'],
+                           stdout=lf, stderr=subprocess.STDOUT)
+        changed.append(f'(logs saved to {os.path.basename(logf)})')
+    state['_last_run'] = now_s
     json.dump(state, open(state_f, 'w'), indent=1)
     with open(log_f, 'a') as f:
         f.write(f'--- {datetime.datetime.now():%Y-%m-%d %H:%M} (database saved {saved})\n' + '\n'.join(lines) + '\n')
@@ -152,7 +172,7 @@ def watch(new_pids):
     print('\n'.join(lines)); [print('CHANGED', c) for c in changed]
     if changed:
         msg = '; '.join(changed)[:200]
-        subprocess.run(['osascript', '-e', f'display notification {json.dumps(msg)} with title "Music: watched tracks changed"'])
+        subprocess.run(['osascript', '-e', f'display notification {json.dumps(msg, ensure_ascii=False)} with title "Music: watched tracks changed"'])
 
 if __name__ == '__main__':
     a = sys.argv[1:]
