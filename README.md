@@ -43,7 +43,7 @@ the dated reports. Run `./sync_check.py paths` to see what's in effect.
 | `audio_hash.py sql "<query>"` | Ad-hoc SQL against the catalog (`files` table, `dupes` view) |
 | `sync_check.py library-check --export [--notify]` | The whole check: lite hash, export Music's XML, snapshot disk + db, 3-way merge, summary and notification |
 | `sync_check.py library-check --xml Library.xml` | The same check with an XML you exported yourself |
-| `dup_report.py` | Report of identical audio within the library |
+| `dup_report.py` | Report of identical audio within the library; known, intended sets can be listed by MD5 in `~/.config/music-library-tools/dup-ignore.txt` |
 | `prune_empty_dirs.py [ROOT] [--dry-run]` | Remove folders that are empty or contain only `.DS_Store` |
 | `export_library.js` | Drives File > Library > Export Library… through Accessibility actions (no keystrokes) |
 | `music_dump.swift` | Dumps the library through Apple's iTunesLibrary framework. Fast, but it reads a shared media library (TV and Books too) that can be stale, so the check uses the XML instead |

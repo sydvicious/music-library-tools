@@ -4,6 +4,11 @@
 Run `./audio_hash.py lite library <library folder>` first so the index is current.
 Usage: ./dup_report.py [--min-bytes N]   (default 300000; smaller files are treated as stubs)
 Writes "<today> Duplicate Audio.txt" and ".tsv" to the reports folder (mlt_config.py).
+
+Known, intended duplicates (e.g. a box set that repeats a take) can be listed in
+~/.config/music-library-tools/dup-ignore.txt: one audio MD5 per line (the full hash from the
+.tsv report), optionally followed by a comment. Blank lines and lines starting with # are skipped.
+Ignored sets are left out of the report and counted in its header.
 """
 import sqlite3, sys, os, datetime
 from collections import defaultdict
@@ -20,7 +25,15 @@ rows = con.execute(
 groups = defaultdict(list)
 for md5, rel, size in rows:
     groups[md5].append((rel, size))
-sets = sorted(((m, sorted(v)) for m, v in groups.items() if len(v) > 1), key=lambda x: x[1][0][0].lower())
+IGNORE_FILE = os.path.expanduser("~/.config/music-library-tools/dup-ignore.txt")
+ignore = set()
+if os.path.exists(IGNORE_FILE):
+    for line in open(IGNORE_FILE):
+        line = line.split("#", 1)[0].strip()
+        if line: ignore.add(line.split()[0].lower())
+all_sets = [(m, sorted(v)) for m, v in groups.items() if len(v) > 1]
+ignored = sum(1 for m, _ in all_sets if m.lower() in ignore)
+sets = sorted(((m, v) for m, v in all_sets if m.lower() not in ignore), key=lambda x: x[1][0][0].lower())
 
 redundant = sum(len(v) - 1 for _, v in sets)
 waste = sum(sum(s for _, s in v) - max(s for _, s in v) for _, v in sets)
@@ -35,7 +48,8 @@ with open(txt, "w") as f:
     f.write(f"Generated {datetime.datetime.now():%Y-%m-%d %H:%M}. Byte-identical audio (tags/artwork ignored); "
             f"files under {MIN//1000} KB excluded as stubs.\n")
     f.write(f"Sets with 2+ copies in the same folder (album): {same_album}. "
-            "Paths relative to the library folder.\n\n")
+            "Paths relative to the library folder.\n"
+            + (f"Ignored {ignored} known set(s) listed in {IGNORE_FILE}.\n" if ignored else "") + "\n")
     for m, v in sets:
         f.write(f"{len(v)} copies  [{m[:12]}]\n")
         for r, s in v:
@@ -46,4 +60,4 @@ with open(tsv, "w") as f:
     for m, v in sets:
         for r, s in v:
             f.write(f"{m}\t{len(v)}\t{r}\t{s}\n")
-print(f"{len(sets)} sets, {redundant} redundant, {waste/1e9:.2f} GB, same-folder sets {same_album}\n{txt}")
+print(f"{len(sets)} sets ({ignored} ignored), {redundant} redundant, {waste/1e9:.2f} GB, same-folder sets {same_album}\n{txt}")
