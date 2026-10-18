@@ -195,6 +195,7 @@ def library_check(xml=None, export=False, do_notify=False):
     if export:
         r = subprocess.run(['osascript', '-l', 'JavaScript', os.path.join(HERE, 'export_library.js'), EXPORT_XML],
                            capture_output=True, text=True)
+        if r.stdout.strip().startswith('FALLBACK'): say(r.stdout.strip())
         if r.returncode != 0:
             msg = 'Music export failed: ' + (r.stderr.strip() or r.stdout.strip())[:200]
             say(msg)
@@ -207,6 +208,8 @@ def library_check(xml=None, export=False, do_notify=False):
     counts = merge(LIBRARY, snapshot_disk(LIBRARY), snapshot_db('library'), snapshot_music_xml(xml))
     problems = {k: v for k, v in counts.items() if k not in ('ok', 'cache-gone', 'no-file')}
     summary = ', '.join(f'{k} {v}' for k, v in sorted(problems.items())) or 'all in sync'
+    if xml_age > 60:
+        summary = f'Music export failed; used the library XML from {xml_age/60:.0f} h ago. ' + summary
     say(f'Result: {summary} (ok {counts["ok"]}, Apple Music cache gone {counts["cache-gone"]})')
     with open(os.path.join(SNAPS, 'library-check.log'), 'a') as f:
         f.write(f'--- {t0:%Y-%m-%d %H:%M:%S}\n' + '\n'.join(log) + '\n')
