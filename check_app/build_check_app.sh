@@ -2,10 +2,8 @@
 # Build ~/Applications/Music Library Check.app and install the 3:00 AM launchd agent.
 #   ./build_check_app.sh            build + (re)load the agent
 #   ./build_check_app.sh --uninstall
-# The app reads export_library.js and the Python scripts from this repository at run time, so
-# only changes to check_app_main.js need a rebuild. After a rebuild macOS treats the app as new:
-# turn it on again in
-# System Settings > Privacy & Security > Device Control and Data Access.
+# The app runs the Python scripts from this repository, so only changes to check_app_main.js need a
+# rebuild. After a rebuild macOS treats the app as new and asks again for access to Music's files.
 set -e
 REPO=${0:A:h:h}
 APP=~/Applications/"Music Library Check.app"
@@ -27,7 +25,6 @@ osacompile -l JavaScript -o "$APP" "$TMP/main.js"
 /usr/libexec/PlistBuddy -c "Add :LSUIElement bool true" "$APP/Contents/Info.plist" 2>/dev/null || true
 /usr/libexec/PlistBuddy -c "Set :CFBundleIdentifier $LABEL" "$APP/Contents/Info.plist" 2>/dev/null || \
   /usr/libexec/PlistBuddy -c "Add :CFBundleIdentifier string $LABEL" "$APP/Contents/Info.plist"
-/usr/libexec/PlistBuddy -c "Add :NSAppleEventsUsageDescription string 'Exports the Music library XML for the nightly library check.'" "$APP/Contents/Info.plist" 2>/dev/null || true
 codesign --force --sign - "$APP"
 rm -rf "$TMP"
 

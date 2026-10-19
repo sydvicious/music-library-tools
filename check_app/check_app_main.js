@@ -1,9 +1,9 @@
 // "Music Library Check.app": run by launchd (via `open -a`) for the nightly library check.
 // build_check_app.sh compiles this file with @@REPO@@ replaced by the repository path.
-// The export code is read from the repository at run time (export_library.js), so script changes
-// don't need a rebuild — and because it runs inside this app, the Accessibility permission
-// ("Device Control and Data Access") belongs to this app alone. Paths come from mlt_config.py.
-ObjC.import("Foundation");
+// The check reads Music's database file directly (musicdb.py), so there is no XML export and no
+// Accessibility or Automation permission. The app exists only so the file-access permission for
+// Music's library folder belongs to it (launchd-run python3 can't get one). Paths come from
+// mlt_config.py.
 const REPO = "@@REPO@@";
 
 function run() {
@@ -14,18 +14,14 @@ function run() {
   const log = m => { if (LOG) app.doShellScript("echo " + q(new Date().toISOString() + " app: " + m) + " >> " + q(LOG)); };
   try {
     const P = JSON.parse(sh("./sync_check.py paths"));
-    const XML = P.snaps + "/Library-export.xml"; LOG = P.snaps + "/library-check.log";
-    const se = Application("System Events");
-    if (!se.processes.byName("Music").exists()) {
-      log("Music not running; opening it and waiting 15 minutes");
-      Application("Music").launch();
+    LOG = P.snaps + "/library-check.log";
+    // Give Music a chance to sync with iCloud and save its database before reading it.
+    if (sh("pgrep -xq Music && echo yes || echo no") === "no") {
+      log("Music not running; opening it in the background and waiting 15 minutes");
+      sh("open -g -a Music");
       delay(900);
     }
-    const src = $.NSString.stringWithContentsOfFileEncodingError(REPO + "/export_library.js", $.NSUTF8StringEncoding, null).js;
-    (0, eval)(src.replace(/^function run\(argv\)/m, "function exportLibrary(argv)"));
-    log("exporting library XML");
-    log(exportLibrary([XML]));
-    sh("./sync_check.py library-check --xml " + q(XML) + " --notify >> " + q(LOG) + " 2>&1");
+    sh("./sync_check.py library-check --notify >> " + q(LOG) + " 2>&1");
     log("done");
   } catch (e) {
     log("FAILED: " + e.message);

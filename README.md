@@ -9,7 +9,7 @@ The core idea is **three sources of truth kept in sync**:
 1. **the disk**: the media files in the library folder
 2. **a database**: an SQLite catalog of every file's path, size, mtime and an *audio-only* MD5
    (ffmpeg hashes the audio packets, so retagging or new artwork doesn't change it)
-3. **Music.app**: every track's file location, read directly from Music's database file (`musicdb.py`), cross-checked against Music's exported library XML when available
+3. **Music.app**: every track's file location, read directly from Music's database file (`musicdb.py`); an XML you export yourself can be used as a cross-check
 
 Each is snapshotted to a TSV sorted by path, and one merge pass classifies every path.
 
@@ -70,14 +70,15 @@ and Music keeps whatever case a path had when the track was added.
 ## Nightly check
 
 `check_app/build_check_app.sh` builds `~/Applications/Music Library Check.app` and a launchd
-agent that opens it at 3:00 AM. The app opens Music if needed (then waits 15 minutes), exports
-the library XML, runs `library-check`, and posts a notification. Output is appended to
+agent that opens it at 3:00 AM. The app opens Music in the background if needed (then waits 15
+minutes so it can sync and save its database), runs `library-check`, and posts a notification. Output is appended to
 `<data>/snapshots/library-check.log`. Snapshot TSVs older than 14 days are deleted.
 
-The app needs **Device Control and Data Access** (Accessibility) plus Automation permission for
-System Events and Music. Grant these on the first manual run (`open -a "Music Library Check"`).
-The app loads `export_library.js` and the Python scripts from this repository at run time, so
-only changes to `check_app_main.js` need a rebuild. A rebuild means granting the permissions again.
+It needs no Accessibility or Automation permission, only access to Music's library folder, which
+macOS asks for on the first manual run (`open -a "Music Library Check"`). The app runs the Python
+scripts from this repository, so only changes to `check_app_main.js` need a rebuild, and a
+rebuild means granting that access again. (`export_library.js` and `--export` remain for manual
+use; the nightly run no longer exports.)
 
 ## recovery/
 
