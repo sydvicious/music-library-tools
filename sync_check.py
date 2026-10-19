@@ -178,7 +178,7 @@ def merge(folder, disk_tsv, db_tsv, music_tsv=None):
             elif d:             cls = 'orphan-unhashed'
             elif b and m:       cls = 'missing'
             elif b:             cls = 'stale-row'
-            elif m.get('kind') == 'HLS media': cls = 'cache-gone'   # Apple Music download whose cache file is gone
+            elif m.get('kind') == 'HLS media' or path.rstrip('/').endswith('.movpkg'): cls = 'cache-gone'   # Apple Music download whose cache file is gone
             else:               cls = 'missing'
         else:
             if d and b:         cls = 'ok' if same(d, b) else 'changed'
