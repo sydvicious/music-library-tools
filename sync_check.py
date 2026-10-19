@@ -39,6 +39,7 @@ import os, sys, sqlite3, heapq, datetime, unicodedata, csv, subprocess, json
 import mlt_config as C
 from collections import Counter
 
+EXTRA_KINDS = {'PDF document', 'iTunes LP', 'iTunes Extras'}   # non-audio library items
 EXT = {'.m4a', '.mp3', '.m4p', '.m4v', '.mp4', '.wav', '.aif', '.aiff', '.aac', '.mov', '.caf', '.flac', '.m4b'}
 DB = C.DB
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -155,7 +156,14 @@ def merge(folder, disk_tsv, db_tsv, music_tsv=None):
         if m and not pkey(path).startswith(pkey(prefix)):
             cls = 'outside' if d or os.path.exists(path) else 'missing'
             counts[cls] += 1; report.append((cls, path, 'music', m.get('pid', ''), describe(m))); return
-        if music_tsv:
+        if music_tsv and m and not d and m.get('kind') in EXTRA_KINDS:
+            # Booklets and LP/Extras bundles aren't audio, so the disk scan skips them; check the
+            # path directly. A gone LP/Extras bundle is unplayable anyway and Music won't let you
+            # delete its hidden entry, so it's 'extra-gone' (not a problem), not 'missing'.
+            if os.path.exists(path): cls = 'ok'
+            elif m.get('kind') == 'PDF document': cls = 'missing'
+            else: cls = 'extra-gone'
+        elif music_tsv:
             if d and b and m:   cls = 'ok' if same(d, b) else 'changed'
             elif d and b:       cls = 'orphan'
             elif d and m:       cls = 'unhashed'
@@ -190,7 +198,7 @@ def merge(folder, disk_tsv, db_tsv, music_tsv=None):
     inputs = f'disk={os.path.basename(disk_tsv)} db={os.path.basename(db_tsv)}' + \
              (f' music={os.path.basename(music_tsv)}' if music_tsv else ' (no music snapshot)')
     print(inputs)
-    order = ['ok', 'changed', 'unhashed', 'orphan', 'orphan-unhashed', 'missing', 'cloud-only', 'apple-music-gone', 'cache-gone', 'stale-row', 'outside', 'no-file']
+    order = ['ok', 'changed', 'unhashed', 'orphan', 'orphan-unhashed', 'missing', 'cloud-only', 'apple-music-gone', 'cache-gone', 'stale-row', 'outside', 'no-file', 'extra-gone']
     print('  ' + '  '.join(f'{k} {counts[k]}' for k in order if counts[k]))
     if nofile['remote']: print(f'  (plus {nofile["remote"]} Apple Music catalog items, which stream)')
     print(f'Report: {out}')
@@ -258,7 +266,7 @@ def library_check(xml=None, export=False, do_notify=False, use_musicdb=False):
         if not xml: sys.exit('library-check needs --musicdb, --xml PATH or --export')
         counts = merge(LIBRARY, snapshot_disk(LIBRARY), snapshot_db('library'), snapshot_music_xml(xml))
         if xml_age > 60: notes.append(f'Music export failed; used the library XML from {xml_age/60:.0f} h ago')
-    problems = {k: v for k, v in counts.items() if k not in ('ok', 'cache-gone', 'no-file')}
+    problems = {k: v for k, v in counts.items() if k not in ('ok', 'cache-gone', 'no-file', 'extra-gone')}
     summary = ', '.join(f'{k} {v}' for k, v in sorted(problems.items())) or 'all in sync'
     if notes: summary = '; '.join(notes) + '. ' + summary
     say(f'Result: {summary} (ok {counts["ok"]}, Apple Music cache gone {counts["cache-gone"]})')
