@@ -223,13 +223,13 @@ EXPORT_XML = os.path.join(SNAPS, 'Library-export.xml')
 MANIFESTS = os.path.join(os.path.dirname(LIBRARY.rstrip('/')), 'Manifests')
 def write_manifest(status=''):
     """Record what the library is right now, beside the media folder (so it travels with every copy):
-    <Manifests>/latest/  Library.musicdb, audio-hashes.sqlite, files.tsv, music-tracks.tsv (replaced each run)
+    <Manifests>/latest/  audio-hashes.sqlite, files.tsv, music-tracks.tsv (replaced each run)
     <Manifests>/<date>/  files.tsv.gz, music-tracks.tsv.gz (small; kept, one per day)
     files.tsv: every file under the media folder with full path, size, mtime and audio MD5."""
     import gzip, shutil, musicdb
     latest = os.path.join(MANIFESTS, 'latest'); os.makedirs(latest, exist_ok=True)
     today = datetime.date.today().isoformat(); dated = os.path.join(MANIFESTS, today); os.makedirs(dated, exist_ok=True)
-    src = musicdb.default_path(); shutil.copy2(src, os.path.join(latest, 'Library.musicdb'))
+    src = musicdb.default_path()
     b, mtime = musicdb.decode(src); tracks, _ = musicdb.parse(b)
     con = sqlite3.connect(DB)
     con.execute(f"vacuum into '{os.path.join(latest, 'audio-hashes.sqlite.new')}'"); con.close()
@@ -257,7 +257,7 @@ def write_manifest(status=''):
               f"Music database saved {datetime.datetime.fromtimestamp(mtime):%Y-%m-%d %H:%M}; {len(files)-1} files; {len(trows)-1} track records.\n"
               "  files.tsv          every file under the media folder: full path, size, mtime, audio MD5\n"
               "  music-tracks.tsv   every track record in Music's database (visible=1: in the library)\n"
-              "  latest/ also holds Library.musicdb (Music's database) and audio-hashes.sqlite\n"
+              "  latest/ also holds audio-hashes.sqlite (the audio-hash database)\n"
               "Restoring from an accumulating backup: copy only the files listed in files.tsv for the date you want;\n"
               "anything else on the backup is an older, renamed or deleted copy.\n")
     for d in (latest, dated): open(os.path.join(d, 'README.txt'), 'w').write(readme)

@@ -85,7 +85,7 @@ use; the nightly run no longer exports.)
 Every `library-check` run also writes a manifest beside the media folder (`<library>/../Manifests`), so it
 travels with every copy or backup of the library:
 
-- `Manifests/latest/`: `Library.musicdb` (Music's database), `audio-hashes.sqlite`, `files.tsv` (every file under
+- `Manifests/latest/`: `audio-hashes.sqlite`, `files.tsv` (every file under
   the media folder with full path, size, mtime and audio MD5) and `music-tracks.tsv` (every track record in
   Music's database). Replaced on each run.
 - `Manifests/YYYY-MM-DD/`: gzipped `files.tsv` and `music-tracks.tsv` for that day (about 4 MB), kept.
