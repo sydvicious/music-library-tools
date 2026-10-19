@@ -20,7 +20,7 @@ if [[ $RESULT != *"all in sync"* && $2 != --force ]]; then
 fi
 
 echo "== Copying $SRC/ -> $DEST/Music/"
-/usr/bin/rsync -a --partial "$SRC/" "$DEST/Music/"
+/usr/bin/rsync -a --partial --exclude "*.movpkg" "$SRC/" "$DEST/Music/"
 
 echo "== Writing the known-good list"
 mkdir -p "$DEST/Music manifests"

@@ -231,7 +231,7 @@ def write_manifest(out, root=None):
     with open(out + '.tmp', 'w', encoding='utf-8') as f:
         f.write(f'# {root} at {datetime.datetime.now():%Y-%m-%d %H:%M:%S}\npath\tsize\tmtime\taudio_md5\n')
         for d, dirs, fs in os.walk(root):
-            dirs.sort()
+            dirs[:] = sorted(x for x in dirs if not x.endswith('.movpkg'))   # Apple Music stream caches
             for x in sorted(fs):
                 if x == '.DS_Store': continue
                 q = os.path.join(d, x)
