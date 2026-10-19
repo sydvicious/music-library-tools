@@ -80,18 +80,13 @@ scripts from this repository, so only changes to `check_app_main.js` need a rebu
 rebuild means granting that access again. (`export_library.js` and `--export` remain for manual
 use; the nightly run no longer exports.)
 
-## Manifest
+## Backups
 
-Every `library-check` run also writes a manifest beside the media folder (`<library>/../Manifests`), so it
-travels with every copy or backup of the library:
-
-- `Manifests/latest/`: `audio-hashes.sqlite`, `files.tsv` (every file under
-  the media folder with full path, size, mtime and audio MD5) and `music-tracks.tsv` (every track record in
-  Music's database). Replaced on each run.
-- `Manifests/YYYY-MM-DD/`: gzipped `files.tsv` and `music-tracks.tsv` for that day (about 4 MB), kept.
-
-Backups that accumulate everything ever written can be restored to any day by copying only the files in that
-day's `files.tsv`. `sync_check.py manifest` writes one without running the check.
+`backup_music.sh /Volumes/Backup` runs the library check, and only if everything is in sync copies the media
+folder's `Music` folder to `/Volumes/Backup/Music/` with `/usr/bin/rsync -a` (no `--delete`, so the drive
+accumulates everything ever written) and writes a timestamped known-good list next to it:
+`/Volumes/Backup/Music manifests/Music-YYYY-MM-DD-HHMM.tsv` (path relative to `Music/`, size, mtime, audio MD5).
+To restore the library as of a given backup, copy only the files listed in that backup's manifest.
 
 ## recovery/
 

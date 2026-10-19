@@ -8,8 +8,7 @@
   sync_check.py check <folder> <source> [music.tsv]  snapshot disk + db, then merge
   sync_check.py paths                                print the configured paths as JSON
   sync_check.py library-check [--no-musicdb] [--export | --xml Library.xml] [--notify]
-        (each run also writes a manifest beside the media folder; see write_manifest)
-  sync_check.py manifest      write the manifest only
+  sync_check.py manifest OUT.tsv   known-good file list of the media folder's Music folder (used by backup_music.sh)
         the whole check for the Music library: lite hash, Music's view (read from its database
         file directly by default, Music can be closed; --no-musicdb turns that off; --export drives File > Export Library; with both, the
         XML cross-checks the database), disk + db snapshots, merge, summary (+ notification), log in
@@ -220,48 +219,27 @@ def merge(folder, disk_tsv, db_tsv, music_tsv=None):
 LIBRARY = C.LIBRARY
 EXPORT_XML = os.path.join(SNAPS, 'Library-export.xml')
 
-MANIFESTS = os.path.join(os.path.dirname(LIBRARY.rstrip('/')), 'Manifests')
-def write_manifest(status=''):
-    """Record what the library is right now, beside the media folder (so it travels with every copy):
-    <Manifests>/latest/  audio-hashes.sqlite, files.tsv, music-tracks.tsv (replaced each run)
-    <Manifests>/<date>/  files.tsv.gz, music-tracks.tsv.gz (small; kept, one per day)
-    files.tsv: every file under the media folder with full path, size, mtime and audio MD5."""
-    import gzip, shutil, musicdb
-    latest = os.path.join(MANIFESTS, 'latest'); os.makedirs(latest, exist_ok=True)
-    today = datetime.date.today().isoformat(); dated = os.path.join(MANIFESTS, today); os.makedirs(dated, exist_ok=True)
-    src = musicdb.default_path()
-    b, mtime = musicdb.decode(src); tracks, _ = musicdb.parse(b)
-    con = sqlite3.connect(DB)
-    con.execute(f"vacuum into '{os.path.join(latest, 'audio-hashes.sqlite.new')}'"); con.close()
-    os.replace(os.path.join(latest, 'audio-hashes.sqlite.new'), os.path.join(latest, 'audio-hashes.sqlite'))
+def write_manifest(out, root=None):
+    """Write the known-good file list for `root` (default: the Music folder inside the media folder) to `out`:
+    one row per file, path relative to `root`, size, mtime, audio MD5 from the hash database."""
+    root = root or os.path.join(LIBRARY, 'Music')
     nfc = lambda x: unicodedata.normalize('NFC', x)
     con = sqlite3.connect(DB)
     h = {nfc(p): m for p, m in con.execute("select path, audio_md5 from files where source='library'")}
     con.close()
-    files = ['path\tsize\tmtime\taudio_md5']
-    for root, dirs, fs in os.walk(LIBRARY):
-        dirs.sort()
-        for x in sorted(fs):
-            if x == '.DS_Store': continue
-            q = os.path.join(root, x)
-            try: st = os.stat(q)
-            except OSError: continue
-            files.append(f"{q}\t{st.st_size}\t{int(st.st_mtime)}\t{h.get(nfc(q), '')}")
-    clean = lambda v: str(v).replace('\t', ' ').replace('\n', ' ')
-    trows = ['\t'.join(musicdb.HEADER)] + ['\t'.join(clean(v) for v in r) for r in musicdb.rows(tracks)]
-    for name, rows in (('files.tsv', files), ('music-tracks.tsv', trows)):
-        data = ('\n'.join(rows) + '\n').encode('utf-8')
-        open(os.path.join(latest, name), 'wb').write(data)
-        with gzip.open(os.path.join(dated, name + '.gz'), 'wb') as g: g.write(data)
-    readme = (f"Music library manifest, {datetime.datetime.now():%Y-%m-%d %H:%M} (library-check: {status or 'n/a'}).\n"
-              f"Music database saved {datetime.datetime.fromtimestamp(mtime):%Y-%m-%d %H:%M}; {len(files)-1} files; {len(trows)-1} track records.\n"
-              "  files.tsv          every file under the media folder: full path, size, mtime, audio MD5\n"
-              "  music-tracks.tsv   every track record in Music's database (visible=1: in the library)\n"
-              "  latest/ also holds audio-hashes.sqlite (the audio-hash database)\n"
-              "Restoring from an accumulating backup: copy only the files listed in files.tsv for the date you want;\n"
-              "anything else on the backup is an older, renamed or deleted copy.\n")
-    for d in (latest, dated): open(os.path.join(d, 'README.txt'), 'w').write(readme)
-    return latest, len(files) - 1
+    n = 0
+    with open(out + '.tmp', 'w', encoding='utf-8') as f:
+        f.write(f'# {root} at {datetime.datetime.now():%Y-%m-%d %H:%M:%S}\npath\tsize\tmtime\taudio_md5\n')
+        for d, dirs, fs in os.walk(root):
+            dirs.sort()
+            for x in sorted(fs):
+                if x == '.DS_Store': continue
+                q = os.path.join(d, x)
+                try: st = os.stat(q)
+                except OSError: continue
+                f.write(f"{os.path.relpath(q, root)}\t{st.st_size}\t{int(st.st_mtime)}\t{h.get(nfc(q), '')}\n"); n += 1
+    os.replace(out + '.tmp', out)
+    return n
 
 def notify(title, msg):
     subprocess.run(['osascript', '-e', f'display notification {json.dumps(msg, ensure_ascii=False)} with title {json.dumps(title, ensure_ascii=False)}'])
@@ -326,11 +304,6 @@ def library_check(xml=None, export=False, do_notify=False, use_musicdb=False):
     summary = ', '.join(f'{k} {v}' for k, v in sorted(problems.items())) or 'all in sync'
     if notes: summary = '; '.join(notes) + '. ' + summary
     say(f'Result: {summary} (ok {counts["ok"]}, Apple Music cache gone {counts["cache-gone"]})')
-    try:
-        where, n = write_manifest(summary)
-        say(f'manifest: {n} files -> {where}')
-    except Exception as e:
-        say(f'manifest FAILED: {e}')
     removed = cleanup()
     if removed: say(f'cleanup: removed {removed} snapshot/report files older than {KEEP_DAYS} days')
     with open(os.path.join(SNAPS, 'library-check.log'), 'a') as f:
@@ -368,7 +341,7 @@ def describe(m):
 if __name__ == '__main__':
     a = sys.argv[1:]
     if len(a) >= 2 and a[0] == 'snapshot-disk': snapshot_disk(a[1], a[2] if len(a) > 2 else None)
-    elif a and a[0] == 'manifest': print(write_manifest())
+    elif len(a) >= 2 and a[0] == 'manifest': print(write_manifest(a[1]), 'files ->', a[1])
     elif len(a) >= 2 and a[0] == 'snapshot-music-xml': snapshot_music_xml(a[1], a[2] if len(a) > 2 else None)
     elif len(a) >= 2 and a[0] == 'snapshot-db': snapshot_db(a[1], a[2] if len(a) > 2 else None)
     elif len(a) in (4, 5) and a[0] == 'merge': merge(a[1], a[2], a[3], a[4] if len(a) > 4 else None)
