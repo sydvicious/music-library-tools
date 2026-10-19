@@ -82,8 +82,8 @@ use; the nightly run no longer exports.)
 
 ## Backups
 
-`backup_music.sh /Volumes/Backup` runs the library check, and only if everything is in sync copies the media
-folder's `Music` folder to `/Volumes/Backup/Music/` with `/usr/bin/rsync -a` (no `--delete`, so the drive
+A backup script (kept outside this repo, e.g. `~/bin/backup_music.sh`) runs the library check, and only if everything is in sync copies the media
+folder's `Music` folder to `/Volumes/Backup/Music/` with `/usr/bin/rsync -a`, using `sync_check.py manifest` for the list (no `--delete`, so the drive
 accumulates everything ever written) and writes a timestamped known-good list next to it:
 `/Volumes/Backup/Music manifests/Music-YYYY-MM-DD-HHMM.tsv` (path relative to `Music/`, size, mtime, audio MD5).
 To restore the library as of a given backup, copy only the files listed in that backup's manifest.
