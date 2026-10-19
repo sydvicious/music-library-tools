@@ -166,10 +166,16 @@ def watch(new_pids):
         changed.append(f'(logs saved to {os.path.basename(logf)})')
     state['_last_run'] = now_s
     json.dump(state, open(state_f, 'w'), indent=1)
+    # Log a count per state, and list only the tracks that are not in the library (the list can be long).
+    from collections import Counter
+    counts = Counter(v for k, v in state.items() if not k.startswith('_'))
+    summary = f"{sum(counts.values())} watched: " + ', '.join(f'{n} {k}' for k, n in sorted(counts.items()))
+    shown = [l for l in lines if ' visible ' not in l]
     with open(log_f, 'a') as f:
-        f.write(f'--- {datetime.datetime.now():%Y-%m-%d %H:%M} (database saved {saved})\n' + '\n'.join(lines) + '\n')
+        f.write(f'--- {datetime.datetime.now():%Y-%m-%d %H:%M} (database saved {saved}) {summary}\n' +
+                ''.join(l + '\n' for l in shown))
         for c in changed: f.write('CHANGED ' + c + '\n')
-    print('\n'.join(lines)); [print('CHANGED', c) for c in changed]
+    print(summary); print('\n'.join(shown)); [print('CHANGED', c) for c in changed]
     if changed:
         msg = '; '.join(changed)[:200]
         subprocess.run(['osascript', '-e', f'display notification {json.dumps(msg, ensure_ascii=False)} with title "Music: watched tracks changed"'])
