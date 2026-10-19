@@ -103,10 +103,17 @@ def snapshot_musicdb(out=None):
     import musicdb
     b, mtime = musicdb.decode()
     tracks, pls = musicdb.parse(b)
-    rows = [r[:-1] for r in musicdb.rows(tracks) if r[-1] == '1']
+    allrows = list(musicdb.rows(tracks))
+    rows = [r[:-1] for r in allrows if r[-1] == '1']
     ghosts = len(tracks) - len(rows)
+    # Deleted ("ghost") records that still name a file: if that file is on disk, Music dropped it.
+    GHOSTS.clear()
+    for r in allrows:
+        if r[-1] != '1' and r[0]: GHOSTS[pkey(r[0])] = dict(zip(musicdb.HEADER, r))
     path = write_sorted(rows, musicdb.HEADER[:-1], out or os.path.join(SNAPS, f'music-db-{stamp()}.tsv'))
     return path, ghosts, mtime
+
+GHOSTS = {}   # path key -> deleted Music record, filled by snapshot_musicdb
 
 def xml_pids(xml):
     import plistlib
@@ -165,6 +172,7 @@ def merge(folder, disk_tsv, db_tsv, music_tsv=None):
             else: cls = 'extra-gone'
         elif music_tsv:
             if d and b and m:   cls = 'ok' if same(d, b) else 'changed'
+            elif d and pkey(path) in GHOSTS: cls = 'removed-by-music'   # file here, Music's record deleted
             elif d and b:       cls = 'orphan'
             elif d and m:       cls = 'unhashed'
             elif d:             cls = 'orphan-unhashed'
@@ -181,6 +189,9 @@ def merge(folder, disk_tsv, db_tsv, music_tsv=None):
             detail = ''
             if cls == 'changed': detail = f"size {b['size']}->{d['size']} mtime {b['mtime']}->{d['mtime']}"
             elif b and b.get('error'): detail = b['error']
+            if cls == 'removed-by-music':
+                g = GHOSTS[pkey(path)]; m = None
+                report.append((cls, path, 'DB' if b else 'D', g.get('pid', ''), 'deleted record: ' + describe(g))); return
             report.append((cls, path, ''.join(x for x, v in (('D', d), ('B', b), ('M', m)) if v),
                            m.get('pid', '') if m else '', describe(m) if m else detail))
     for key, tag, row in heapq.merge(*streams, key=lambda x: x[0]):
@@ -198,7 +209,7 @@ def merge(folder, disk_tsv, db_tsv, music_tsv=None):
     inputs = f'disk={os.path.basename(disk_tsv)} db={os.path.basename(db_tsv)}' + \
              (f' music={os.path.basename(music_tsv)}' if music_tsv else ' (no music snapshot)')
     print(inputs)
-    order = ['ok', 'changed', 'unhashed', 'orphan', 'orphan-unhashed', 'missing', 'cloud-only', 'apple-music-gone', 'cache-gone', 'stale-row', 'outside', 'no-file', 'extra-gone']
+    order = ['ok', 'removed-by-music', 'changed', 'unhashed', 'orphan', 'orphan-unhashed', 'missing', 'cloud-only', 'apple-music-gone', 'cache-gone', 'stale-row', 'outside', 'no-file', 'extra-gone']
     print('  ' + '  '.join(f'{k} {counts[k]}' for k in order if counts[k]))
     if nofile['remote']: print(f'  (plus {nofile["remote"]} Apple Music catalog items, which stream)')
     print(f'Report: {out}')
@@ -274,7 +285,12 @@ def library_check(xml=None, export=False, do_notify=False, use_musicdb=False):
     if removed: say(f'cleanup: removed {removed} snapshot/report files older than {KEEP_DAYS} days')
     with open(os.path.join(SNAPS, 'library-check.log'), 'a') as f:
         f.write(f'--- {t0:%Y-%m-%d %H:%M:%S}\n' + '\n'.join(log) + '\n')
-    if do_notify: notify('Music library check', summary)
+    if do_notify:
+        if counts.get('removed-by-music'):
+            notify('Music REMOVED tracks from your library',
+                   f"{counts['removed-by-music']} file(s) still on disk; see the Sync Check report. " + summary)
+        else:
+            notify('Music library check', summary)
     return problems
 
 KEEP_DAYS = 14
