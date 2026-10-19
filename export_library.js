@@ -5,14 +5,41 @@
 // Needs Accessibility ("Device Control and Data Access") for whatever runs it.
 // The save panel saves into whatever folder it last used; the script finds the new file by its
 // unique name and moves it to the requested path. It tries twice (up to 90 s each for the dialog);
-// if both fail it cancels any open dialog and, when a previous export exists at the output path,
-// returns "FALLBACK: …" instead of failing so the check can still run.
+// if both fail it cancels any open dialog, keeps watching 5 more minutes to cancel a panel that
+// appears late, and, when a previous export exists at the output path, returns "FALLBACK: …"
+// instead of failing so the check can still run. With the display asleep or the screen locked
+// it doesn't try at all and returns "SKIPPED: …".
 ObjC.import("Foundation");
+ObjC.import("CoreGraphics");
+
+// Returns why the screen can't be used for the export ("display asleep", "screen locked",
+// "not the console session"), or "" when it is awake and unlocked.
+function screenUnavailable() {
+  try {
+    if ($.CGDisplayIsAsleep($.CGMainDisplayID())) return "display asleep";
+    const d = ObjC.castRefToObject($.CGSessionCopyCurrentDictionary());
+    if (!d.js) return "no login session on the console";
+    const locked = d.objectForKey("CGSSessionScreenIsLocked");
+    if (locked && locked.js) return "screen locked";
+    const onConsole = d.objectForKey("kCGSSessionOnConsoleKey");
+    if (onConsole && onConsole.js === false) return "not the console session";
+  } catch (e) { return ""; }   // can't tell: try the export as before
+  return "";
+}
+
 function run(argv) {
   if (!argv || !argv[0]) throw new Error("usage: osascript -l JavaScript export_library.js /full/path/Library.xml");
   const out = argv[0];
   const fm = $.NSFileManager.defaultManager;
   const unique = "Library-export-" + Date.now() + ".xml";
+  const previous = () => fm.fileExistsAtPath(out)
+    ? "using previous XML from " + fm.attributesOfItemAtPathError(out, null).objectForKey("NSFileModificationDate").js.toISOString()
+    : "no previous XML";
+
+  // With the display asleep or the screen locked, Music's Save panel shows up late or never
+  // reports itself, and then sits open until someone dismisses it. Don't try.
+  const why = screenUnavailable();
+  if (why) return "SKIPPED: " + why + "; " + previous();
 
   const se = Application("System Events"), p = se.processes.byName("Music");
   if (!p.exists()) { Application("Music").launch(); delay(10); }
@@ -57,12 +84,18 @@ function run(argv) {
     catch (e) { lastErr = e; cancelAny(); delay(5); }
   }
   if (lastErr) {
-    // Don't leave a dialog open; fall back to the previous export if there is one.
+    // Don't leave a dialog open: the panel can appear minutes after the menu click, so keep
+    // watching for 5 minutes and cancel it if it shows up. Then fall back to the previous export.
     cancelAny();
-    if (fm.fileExistsAtPath(out)) {
-      const when = fm.attributesOfItemAtPathError(out, null).objectForKey("NSFileModificationDate").js;
-      return "FALLBACK: export failed (" + lastErr.message + "); using previous XML from " + when.toISOString();
+    let lateCancelled = 0;
+    for (let i = 0; i < 20; i++) {
+      delay(15);
+      const pn = findPanel();
+      if (pn) { try { const c = buttonIn(pn, "Cancel"); if (c) { c.click(); lateCancelled++; } } catch (e) {} }
     }
+    if (fm.fileExistsAtPath(out))
+      return "FALLBACK: export failed (" + lastErr.message + ")" +
+        (lateCancelled ? "; cancelled a late Save panel" : "") + "; " + previous();
     throw lastErr;
   }
 
